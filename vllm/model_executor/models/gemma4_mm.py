@@ -64,7 +64,12 @@ from vllm.multimodal.processing.processor import (
 from vllm.sequence import IntermediateTensors
 from vllm.utils.tensor_schema import TensorSchema, TensorShape
 
-from .interfaces import MultiModalEmbeddings, SupportsMultiModal, SupportsPP
+from .interfaces import (
+    MultiModalEmbeddings,
+    SupportsLoRA,
+    SupportsMultiModal,
+    SupportsPP,
+)
 from .utils import (
     AutoWeightsLoader,
     WeightsMapper,
@@ -73,7 +78,6 @@ from .utils import (
 )
 
 logger = init_logger(__name__)
-
 # Video constants — match transformers Gemma4VideoProcessor defaults.
 _VIDEO_MAX_SOFT_TOKENS = 70  # soft tokens per video frame (vs 280 for images)
 _VIDEO_MAX_FRAMES = 32  # max sampled frames per video
@@ -201,17 +205,16 @@ class Gemma4ProcessingInfo(BaseProcessingInfo):
         self, seq_len: int, mm_counts: Mapping[str, int]
     ) -> Mapping[str, int] | None:
         config = self.get_hf_config()
-        # Upper bound: the pooler outputs default_output_length slots
-        # per image (280).  After padding is stripped the actual count
-        # is ≤ this value, but vLLM needs the max for memory planning.
-        tokens_per_image = config.vision_config.default_output_length
+        # LoRA tower budgeting needs the largest encoder-side soft-token
+        # count Gemma4 accepts, not just the model's default setting.
+        tokens_per_image = 1120
         tokens: dict[str, int] = {"image": tokens_per_image}
         if config.audio_config is not None:
             # Audio max tokens from the processor's audio_seq_length.
             processor = self.get_hf_processor()
             tokens["audio"] = processor.audio_seq_length
-        # Video: each frame ≤ 70 soft tokens + boi + eoi + ~6 ts tokens.
-        tokens["video"] = _VIDEO_MAX_FRAMES * (_VIDEO_MAX_SOFT_TOKENS + 2 + 6)
+        # Video placeholder updates embed only the repeated video soft tokens.
+        tokens["video"] = _VIDEO_MAX_FRAMES * _VIDEO_MAX_SOFT_TOKENS
         return tokens
 
     def get_data_parser(self) -> MultiModalDataParser:
@@ -471,17 +474,16 @@ class Gemma4MultiModalProcessor(BaseMultiModalProcessor[Gemma4ProcessingInfo]):
         tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
         # Validate max_soft_tokens early and exit cleanly on bad values.
-        _SUPPORTED_SOFT_TOKENS = (70, 140, 280, 560, 1120)
-
+        supported_soft_tokens = (70, 140, 280, 560, 1120)
         merged_kwargs = self.info.ctx.get_merged_mm_kwargs(mm_kwargs)
         val = merged_kwargs.get("max_soft_tokens")
         if val is None:
             val = merged_kwargs.get("images_kwargs", {}).get("max_soft_tokens")
 
-        if val is not None and val not in _SUPPORTED_SOFT_TOKENS:
+        if val is not None and val not in supported_soft_tokens:
             raise ValueError(
                 f"Unsupported max_soft_tokens value: {val}. "
-                f"Valid values are {_SUPPORTED_SOFT_TOKENS}."
+                f"Valid values are {supported_soft_tokens}."
             )
 
         mm_data = dict(mm_data)
@@ -845,7 +847,9 @@ class Gemma4MultimodalEmbedder(nn.Module):
     info=Gemma4ProcessingInfo,
     dummy_inputs=Gemma4DummyInputsBuilder,
 )
-class Gemma4ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP):
+class Gemma4ForConditionalGeneration(
+    nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA
+):
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",
@@ -868,6 +872,13 @@ class Gemma4ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP):
             "model.audio_tower.": "audio_tower.",
             "lm_head.": "language_model.lm_head.",
             "model": "language_model.model",
+        },
+        orig_to_new_substr={
+            # Mirror the text-only Gemma4 LoRA remapping for MoE layers so
+            # adapters saved from the conditional wrapper target the language
+            # backbone under `language_model.model.*`.
+            ".experts.gate_up_proj": ".moe.gate_up_proj",
+            ".experts.down_proj": ".moe.down_proj",
         }
     )
 
@@ -1326,6 +1337,16 @@ class Gemma4ForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP):
             connector=["embed_vision", "embed_audio"],
             tower_model=["vision_tower", "audio_tower"],
         )
+
+    def get_num_mm_encoder_tokens(self, num_image_tokens: int) -> int:
+        # Gemma4 prompt updates mark only multimodal soft-token positions for
+        # embedding replacement, so the encoder-side LoRA token count matches
+        # the multimodal embed count.
+        return num_image_tokens
+
+    def get_num_mm_connector_tokens(self, num_vision_tokens: int) -> int:
+        # The multimodal embedders are length-preserving projections.
+        return num_vision_tokens
 
     @classmethod
     def get_placeholder_str(cls, modality: str, i: int) -> str | None:
