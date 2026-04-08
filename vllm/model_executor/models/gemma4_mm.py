@@ -881,8 +881,8 @@ class Gemma4ForConditionalGeneration(
             # Mirror the text-only Gemma4 LoRA remapping for MoE layers so
             # adapters saved from the conditional wrapper target the language
             # backbone under `language_model.model.*`.
-            ".experts.gate_up_proj": ".moe.gate_up_proj",
-            ".experts.down_proj": ".moe.down_proj",
+            ".moe.experts.gate_up_proj": ".moe.gate_up_proj",
+            ".moe.experts.down_proj": ".moe.down_proj",
         }
     )
 
