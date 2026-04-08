@@ -78,6 +78,9 @@ from .utils import (
 )
 
 logger = init_logger(__name__)
+# Supported image soft-token budgets accepted by the Gemma4 processor.
+_SUPPORTED_SOFT_TOKENS = (70, 140, 280, 560, 1120)
+_MAX_IMAGE_SOFT_TOKENS = max(_SUPPORTED_SOFT_TOKENS)
 # Video constants — match transformers Gemma4VideoProcessor defaults.
 _VIDEO_MAX_SOFT_TOKENS = 70  # soft tokens per video frame (vs 280 for images)
 _VIDEO_MAX_FRAMES = 32  # max sampled frames per video
@@ -205,16 +208,18 @@ class Gemma4ProcessingInfo(BaseProcessingInfo):
         self, seq_len: int, mm_counts: Mapping[str, int]
     ) -> Mapping[str, int] | None:
         config = self.get_hf_config()
-        # LoRA tower budgeting needs the largest encoder-side soft-token
-        # count Gemma4 accepts, not just the model's default setting.
-        tokens_per_image = 1120
+        # Use the largest supported image soft-token budget here. The default
+        # output length is only 280, but Gemma4 accepts larger max_soft_tokens
+        # overrides and optional tower/connector LoRA budgeting needs an upper
+        # bound that covers those valid image requests.
+        tokens_per_image = _MAX_IMAGE_SOFT_TOKENS
         tokens: dict[str, int] = {"image": tokens_per_image}
         if config.audio_config is not None:
             # Audio max tokens from the processor's audio_seq_length.
             processor = self.get_hf_processor()
             tokens["audio"] = processor.audio_seq_length
-        # Video placeholder updates embed only the repeated video soft tokens.
-        tokens["video"] = _VIDEO_MAX_FRAMES * _VIDEO_MAX_SOFT_TOKENS
+        # Video: each frame <= 70 soft tokens + boi + eoi + ~6 ts tokens.
+        tokens["video"] = _VIDEO_MAX_FRAMES * (_VIDEO_MAX_SOFT_TOKENS + 2 + 6)
         return tokens
 
     def get_data_parser(self) -> MultiModalDataParser:
@@ -474,16 +479,15 @@ class Gemma4MultiModalProcessor(BaseMultiModalProcessor[Gemma4ProcessingInfo]):
         tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
         # Validate max_soft_tokens early and exit cleanly on bad values.
-        supported_soft_tokens = (70, 140, 280, 560, 1120)
         merged_kwargs = self.info.ctx.get_merged_mm_kwargs(mm_kwargs)
         val = merged_kwargs.get("max_soft_tokens")
         if val is None:
             val = merged_kwargs.get("images_kwargs", {}).get("max_soft_tokens")
 
-        if val is not None and val not in supported_soft_tokens:
+        if val is not None and val not in _SUPPORTED_SOFT_TOKENS:
             raise ValueError(
                 f"Unsupported max_soft_tokens value: {val}. "
-                f"Valid values are {supported_soft_tokens}."
+                f"Valid values are {_SUPPORTED_SOFT_TOKENS}."
             )
 
         mm_data = dict(mm_data)
