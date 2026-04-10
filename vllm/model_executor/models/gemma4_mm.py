@@ -67,6 +67,7 @@ from vllm.utils.tensor_schema import TensorSchema, TensorShape
 from .interfaces import (
     MultiModalEmbeddings,
     SupportsLoRA,
+    SupportsEagle3,
     SupportsMultiModal,
     SupportsPP,
 )
@@ -852,7 +853,11 @@ class Gemma4MultimodalEmbedder(nn.Module):
     dummy_inputs=Gemma4DummyInputsBuilder,
 )
 class Gemma4ForConditionalGeneration(
-    nn.Module, SupportsMultiModal, SupportsPP, SupportsLoRA
+    nn.Module,
+    SupportsMultiModal,
+    SupportsPP,
+    SupportsLoRA
+    SupportsEagle3,
 ):
     packed_modules_mapping = {
         "qkv_proj": [
