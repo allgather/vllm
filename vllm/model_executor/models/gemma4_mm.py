@@ -856,7 +856,7 @@ class Gemma4ForConditionalGeneration(
     nn.Module,
     SupportsMultiModal,
     SupportsPP,
-    SupportsLoRA
+    SupportsLoRA,
     SupportsEagle3,
 ):
     packed_modules_mapping = {
@@ -882,13 +882,6 @@ class Gemma4ForConditionalGeneration(
             "lm_head.": "language_model.lm_head.",
             "model": "language_model.model",
         },
-        orig_to_new_substr={
-            # Mirror the text-only Gemma4 LoRA remapping for MoE layers so
-            # adapters saved from the conditional wrapper target the language
-            # backbone under `language_model.model.*`.
-            ".moe.experts.gate_up_proj": ".moe.gate_up_proj",
-            ".moe.experts.down_proj": ".moe.down_proj",
-        }
     )
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
