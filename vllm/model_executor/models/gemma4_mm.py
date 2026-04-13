@@ -66,8 +66,8 @@ from vllm.utils.tensor_schema import TensorSchema, TensorShape
 
 from .interfaces import (
     MultiModalEmbeddings,
-    SupportsLoRA,
     SupportsEagle3,
+    SupportsLoRA,
     SupportsMultiModal,
     SupportsPP,
 )
@@ -219,7 +219,7 @@ class Gemma4ProcessingInfo(BaseProcessingInfo):
             # Audio max tokens from the processor's audio_seq_length.
             processor = self.get_hf_processor()
             tokens["audio"] = processor.audio_seq_length
-        # Video: each frame <= 70 soft tokens + boi + eoi + ~6 ts tokens.
+        # Video: each frame ≤ 70 soft tokens + boi + eoi + ~6 ts tokens.
         tokens["video"] = _VIDEO_MAX_FRAMES * (_VIDEO_MAX_SOFT_TOKENS + 2 + 6)
         return tokens
 
@@ -881,7 +881,7 @@ class Gemma4ForConditionalGeneration(
             "model.audio_tower.": "audio_tower.",
             "lm_head.": "language_model.lm_head.",
             "model": "language_model.model",
-        },
+        }
     )
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
