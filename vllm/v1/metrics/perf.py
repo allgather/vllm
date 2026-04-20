@@ -1064,9 +1064,8 @@ class ModelMetrics:
 
         # Build a single batch context
         ctx = ExecutionContext()
-        hf_text_config = self.vllm_config.model_config.hf_text_config
-        index_topk = getattr(hf_text_config, "index_topk", None)
-        has_sparse_index_topk = index_topk is not None
+        hf_config = self.vllm_config.model_config.hf_config
+        index_topk = getattr(hf_config, "index_topk", None)
         sparse_token_context_product = 0
 
         # Process new requests (these are in prefill phase)
@@ -1080,7 +1079,7 @@ class ModelMetrics:
             # num_computed_tokens represents previously computed tokens in the sequence
             context_len = new_req.num_computed_tokens + num_tokens
             ctx.add(num_tokens, context_len, is_prefill=True)
-            if has_sparse_index_topk:
+            if index_topk is not None:
                 sparse_token_context_product += num_tokens * min(
                     context_len, index_topk
                 )
@@ -1100,18 +1099,19 @@ class ModelMetrics:
             # unless they're doing chunked prefill (num_tokens > 1)
             is_prefill = num_tokens > 1
             ctx.add(num_tokens, context_len, is_prefill)
-            if has_sparse_index_topk:
+            if index_topk is not None:
                 sparse_token_context_product += num_tokens * min(
                     context_len, index_topk
                 )
 
         num_flops_breakdown = self.get_num_flops_breakdown(ctx, True)
         dense_token_context_product = ctx.total_token_context_product()
-        if has_sparse_index_topk and dense_token_context_product > 0:
+        if index_topk is not None and dense_token_context_product > 0:
             for key in ("attn.attn_qk", "attn.attn_av"):
                 if key in num_flops_breakdown:
                     num_flops_breakdown[key] = (
-                        num_flops_breakdown[key] * sparse_token_context_product
+                        num_flops_breakdown[key]
+                        * sparse_token_context_product
                         // dense_token_context_product
                     )
         read_bytes_breakdown = self.get_read_bytes_breakdown(ctx, True)
