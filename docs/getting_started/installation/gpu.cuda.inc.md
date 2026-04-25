@@ -276,10 +276,11 @@ For example:
 ```yaml
 command:
   - Qwen/Qwen3-0.6B
-  - --compilation-config.mode=3
+  - --compilation-config
+  - '{"mode": 3}'
 ```
 
-If using JSON, pass `--compilation-config` and the JSON value as separate list items.
+For single nested values, dotted arguments such as `--compilation-config.mode=3` are also supported.
 
 !!! note
     You can either use the `ipc=host` flag or `--shm-size` flag to allow the
