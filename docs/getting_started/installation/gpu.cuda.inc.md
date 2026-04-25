@@ -267,6 +267,20 @@ docker.io/vllm/vllm-openai:latest \
 
 You can add any other [engine-args](https://docs.vllm.ai/en/latest/configuration/engine_args/) you need after the image tag (`vllm/vllm-openai:latest`).
 
+#### Docker Compose
+
+In Docker Compose, `vllm/vllm-openai` already uses `vllm serve` as its entrypoint, so `command` should contain only serve arguments. Prefer list form so each argument is preserved.
+
+For example:
+
+```yaml
+command:
+  - Qwen/Qwen3-0.6B
+  - --compilation-config.mode=3
+```
+
+If using JSON, pass `--compilation-config` and the JSON value as separate list items.
+
 !!! note
     You can either use the `ipc=host` flag or `--shm-size` flag to allow the
     container to access the host's shared memory. vLLM uses PyTorch, which uses shared
